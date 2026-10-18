@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Habit Dependency Chain Builder</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .habit-node { cursor: pointer; transition: all 0.2s; }
+  .habit-node:hover { transform: translateY(-2px); }
+  .completed-today { box-shadow: 0 0 0 3px #22c55e; }
+  svg line { stroke: #94a3b8; stroke-width: 2; marker-end: url(#arrow); }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<div class="max-w-5xl mx-auto p-4">
+  <h1 class="text-2xl font-bold text-slate-800 mb-1">Habit Dependency Chain Builder</h1>
+  <p class="text-slate-500 text-sm mb-4">Add habits with prerequisites. Click a habit to log completion today.</p>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:col-span-1">
+      <h2 class="font-semibold text-slate-700 mb-3">Add Habit</h2>
+      <div class="space-y-2">
+        <input id="habitName" type="text" placeholder="Habit name" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <select id="prereq" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <option value="">No prerequisite</option>
+        </select>
+        <button onclick="addHabit()" class="w-full py-2 bg-blue-500 text-white rounded-lg text-sm font-semibold hover:bg-blue-600 transition">Add Habit</button>
+      </div>
+      <div class="mt-4">
+        <div class="text-xs font-semibold text-slate-400 uppercase mb-2">Legend</div>
+        <div class="flex items-center gap-2 text-xs text-slate-500 mb-1"><span class="w-3 h-3 rounded-full bg-green-400 inline-block"></span> Completed today</div>
+        <div class="flex items-center gap-2 text-xs text-slate-500 mb-1"><span class="w-3 h-3 rounded-full bg-blue-400 inline-block"></span> Unlocked (prereq done)</div>
+        <div class="flex items-center gap-2 text-xs text-slate-500"><span class="w-3 h-3 rounded-full bg-slate-300 inline-block"></span> Locked</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:col-span-2">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-slate-700">Habit Chain</h2>
+        <span class="text-xs text-slate-400" id="todayDate"></span>
+      </div>
+      <div id="dagContainer" class="relative overflow-x-auto" style="min-height: 200px;"></div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+    <h2 class="font-semibold text-slate-700 mb-3">Habit Streaks</h2>
+    <div id="streakList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2"></div>
+  </div>
+</div>
+
+<script>
+const TODAY = new Date().toISOString().slice(0,10);
+document.getElementById('todayDate').textContent = TODAY;
+
+let habits = JSON.parse(localStorage.getItem('habits5') || '[]');
+if (!habits.length) {
+  habits = [
+    {id:'1', name:'Wake up early', prereq:'', completions:[]},
+    {id:'2', name:'Morning walk', prereq:'1', completions:[]},
+    {id:'3', name:'Meditate', prereq:'1', completions:[]},
+    {id:'4', name:'Read 20 min', prereq:'3', completions:[]},
+    {id:'5', name:'Exercise', prereq:'2', completions:[]},
+  ];
+  save();
+}
+
+function save() { localStorage.setItem('habits5', JSON.stringify(habits)); }
+
+function addHabit() {
+  const name = document.getElementById('habitName').value.trim();
+  if (!name) return;
+  const prereq = document.getElementById('prereq').value;
+  const id = Date.now().toString();
+  habits.push({id, name, prereq, completions:[]});
+  save();
+  document.getElementById('habitName').value = '';
+  render();
+}
+
+function toggleCompletion(id) {
+  const h = habits.find(x => x.id === id);
+  if (!h) return;
+  if (h.completions.includes(TODAY)) {
+    h.completions = h.completions.filter(d => d !== TODAY);
+  } else {
+    h.completions.push(TODAY);
+  }
+  save();
+  render();
+}
+
+function isCompletedToday(id) {
+  const h = habits.find(x => x.id === id);
+  return h && h.completions.includes(TODAY);
+}
+
+function isUnlocked(id) {
+  const h = habits.find(x => x.id === id);
+  if (!h || !h.prereq) return true;
+  return isCompletedToday(h.prereq);
+}
+
+function getStreak(h) {
+  if (!h.completions.length) return 0;
+  const sorted = [...h.completions].sort().reverse();
+  let streak = 0;
+  let check = new Date(TODAY);
+  for (let d of sorted) {
+    if (d === check.toISOString().slice(0,10)) {
+      streak++;
+      check.setDate(check.getDate() - 1);
+    } else break;
+  }
+  return streak;
+}
+
+function buildLevels() {
+  const levels = {};
+  const visited = new Set();
+  function assignLevel(id, level) {
+    if (visited.has(id)) return;
+    visited.add(id);
+    levels[id] = Math.max(levels[id] || 0, level);
+    habits.filter(h => h.prereq === id).forEach(h => assignLevel(h.id, level + 1));
+  }
+  habits.filter(h => !h.prereq).forEach(h => assignLevel(h.id, 0));
+  habits.forEach(h => { if (!(h.id in levels)) levels[h.id] = 0; });
+  return levels;
+}
+
+function render() {
+  // Update prereq dropdown
+  const sel = document.getElementById('prereq');
+  sel.innerHTML = '<option value="">No prerequisite</option>';
+  habits.forEach(h => { sel.innerHTML += `<option value="${h.id}">${h.name}</option>`; });
+
+  // Build DAG
+  const levels = buildLevels();
+  const maxLevel = Math.max(0, ...Object.values(levels));
+  const byLevel = {};
+  for (let l = 0; l <= maxLevel; l++) byLevel[l] = [];
+  habits.forEach(h => byLevel[levels[h.id] || 0].push(h));
+
+  const W = 140, H = 70, PAD = 20, VGAP = 80;
+  const positions = {};
+  let containerW = 0, containerH = 0;
+
+  const container = document.getElementById('dagContainer');
+  container.innerHTML = '';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('id','dagSvg');
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+  defs.innerHTML = `<marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/></marker>`;
+  svg.appendChild(defs);
+
+  for (let l = 0; l <= maxLevel; l++) {
+    const nodes = byLevel[l];
+    const y = PAD + l * (H + VGAP);
+    containerH = y + H + PAD;
+    const totalW = nodes.length * W + (nodes.length - 1) * PAD;
+    containerW = Math.max(containerW, totalW + PAD * 2);
+    nodes.forEach((h, i) => {
+      const x = PAD + i * (W + PAD);
+      positions[h.id] = {x: x + W/2, y: y + H/2};
+    });
+  }
+
+  svg.setAttribute('width', containerW);
+  svg.setAttribute('height', containerH);
+  svg.style.display = 'block';
+
+  // Draw edges
+  habits.forEach(h => {
+    if (h.prereq && positions[h.prereq] && positions[h.id]) {
+      const from = positions[h.prereq];
+      const to = positions[h.id];
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', from.x); line.setAttribute('y1', from.y + H/2 - 10);
+      line.setAttribute('x2', to.x); line.setAttribute('y2', to.y - H/2 + 10);
+      svg.appendChild(line);
+    }
+  });
+
+  container.appendChild(svg);
+
+  // Draw nodes as HTML divs
+  for (let l = 0; l <= maxLevel; l++) {
+    const nodes = byLevel[l];
+    nodes.forEach((h, i) => {
+      const x = PAD + i * (W + PAD);
+      const y = PAD + l * (H + VGAP);
+      const done = isCompletedToday(h.id);
+      const unlocked = isUnlocked(h.id);
+      const streak = getStreak(h);
+      const div = document.createElement('div');
+      div.className = `habit-node absolute rounded-xl border-2 p-2 text-center select-none ${
+        done ? 'bg-green-50 border-green-400 completed-today' :
+        unlocked ? 'bg-blue-50 border-blue-300' :
+        'bg-slate-100 border-slate-300 opacity-60'
+      }`;
+      div.style.left = x + 'px';
+      div.style.top = y + 'px';
+      div.style.width = W + 'px';
+      div.style.height = H + 'px';
+      div.setAttribute('role', 'button');
+      div.setAttribute('aria-label', `${h.name}, ${done ? 'completed today' : 'not completed'}`);
+      div.setAttribute('tabindex', '0');
+      div.innerHTML = `
+        <div class="text-xs font-semibold ${done ? 'text-green-700' : unlocked ? 'text-blue-700' : 'text-slate-400'} leading-tight">${h.name}</div>
+        <div class="text-xs text-slate-400 mt-1">${streak > 0 ? '🔥 ' + streak + ' day streak' : done ? '✓ Done today' : unlocked ? 'Tap to complete' : '🔒 Locked'}</div>
+      `;
+      div.addEventListener('click', () => toggleCompletion(h.id));
+      div.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') toggleCompletion(h.id); });
+      container.appendChild(div);
+    });
+  }
+
+  container.style.height = containerH + 'px';
+  container.style.position = 'relative';
+
+  // Streak list
+  const list = document.getElementById('streakList');
+  list.innerHTML = '';
+  habits.forEach(h => {
+    const streak = getStreak(h);
+    const total = h.completions.length;
+    list.innerHTML += `<div class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-sm">
+      <span class="font-medium text-slate-700">${h.name}</span>
+      <span class="flex gap-2">
+        <span class="text-orange-500 font-bold">🔥${streak}</span>
+        <span class="text-slate-400 text-xs">${total} total</span>
+        <button onclick="habits=habits.filter(x=>x.id!=='${h.id}');save();render()" class="text-red-400 hover:text-red-600 ml-1 text-xs" aria-label="Delete ${h.name}">✕</button>
+      </span>
+    </div>`;
+  });
+}
+
+render();
+</script>
+</body>
+</html>
